@@ -263,6 +263,18 @@ bool valid_appearance(const Appearance &a) noexcept {
             size += 8 + item.asset.size() + item.parameters.size() * 4;
         }
     }
+    // The packages the items name: a table of the distinct ones, then an index per item.
+    std::vector<std::string_view> packages;
+    size += 1 + a.skater.items.size() + a.board.items.size();
+    for (const auto *r : {&a.skater, &a.board})
+        for (const auto &item : r->items) {
+            if (item.package.empty()) continue;
+            if (!valid_map_package(item.package)) return false;
+            if (std::find(packages.begin(), packages.end(), item.package) != packages.end()) continue;
+            if (packages.size() == max_outfit_packages) return false;
+            packages.push_back(item.package);
+            size += 1 + item.package.size();
+        }
     return size <= max_appearance_bytes;
 }
 bool valid_transform(const Transform &t) noexcept {
@@ -595,6 +607,24 @@ std::vector<std::uint8_t> encode(const Packet &p, bool compact_pose, std::uint32
             for (const auto part : style.to) w.integer(part, 1);
             w.integer(style.speed, 1);
         }
+        // Each item's package (CosmeticSlot::package): the distinct ones once, then one index per
+        // item, skater then board, 0xff for none.
+        std::vector<std::string_view> packages;
+        for (const auto *r : {&p.appearance.skater, &p.appearance.board})
+            for (const auto &item : r->items)
+                if (!item.package.empty() && std::find(packages.begin(), packages.end(), item.package) == packages.end())
+                    packages.push_back(item.package);
+        w.integer(packages.size(), 1);
+        for (const auto package : packages) {
+            w.integer(package.size(), 1);
+            w.bytes.insert(w.bytes.end(), package.begin(), package.end());
+        }
+        for (const auto *r : {&p.appearance.skater, &p.appearance.board})
+            for (const auto &item : r->items)
+                w.integer(item.package.empty() ? 0xffU
+                                               : static_cast<unsigned>(std::find(packages.begin(), packages.end(), item.package) -
+                                                                       packages.begin()),
+                          1);
     } else if (p.kind == PacketKind::audio) {
         w.integer(p.audio.size(), 2);
         AudioState previous;
@@ -966,6 +996,26 @@ std::optional<Packet> decode(std::span<const std::uint8_t> bytes) noexcept {
                 styled = styled && valid_mark_style(style);
             }
             p.appearance.tag = carried_tag(p.appearance.marks);
+            // The items' packages: a table of distinct, valid names, then an index per item.
+            const auto count = r.integer(1);
+            if (count > max_outfit_packages) return {};
+            std::vector<std::string> packages;
+            for (std::uint64_t i = 0; i < count; ++i) {
+                const auto length = r.integer(1);
+                if (!length || length > max_map_package || length > bytes.size() - r.at) return {};
+                std::string package(reinterpret_cast<const char *>(bytes.data() + r.at), static_cast<std::size_t>(length));
+                r.at += static_cast<std::size_t>(length);
+                if (!valid_map_package(package) || std::find(packages.begin(), packages.end(), package) != packages.end())
+                    return {};
+                packages.push_back(std::move(package));
+            }
+            for (auto *recipe : {&p.appearance.skater, &p.appearance.board})
+                for (auto &item : recipe->items) {
+                    const auto index = r.integer(1);
+                    if (index == 0xff) continue;
+                    if (index >= packages.size()) return {};
+                    item.package = packages[static_cast<std::size_t>(index)];
+                }
             if (flags > 3 || !styled || !p.map || !valid_appearance(p.appearance))
                 return {};
         } else if (p.kind == PacketKind::audio) {

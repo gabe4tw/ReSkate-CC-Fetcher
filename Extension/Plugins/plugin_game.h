@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -487,6 +488,8 @@ public:
     // board. Nothing until their outfit has arrived.
     struct PlayerOutfit {
         std::vector<std::string> skater, board;
+        std::map<std::string, std::string> packages; // item -> the Thunderstore package it is from
+        std::set<std::string> missing;               // items this PC does not have
     };
     virtual std::optional<PlayerOutfit> player_outfit(std::uint64_t) { return std::nullopt; }
     // Items shown on other players, on this screen, as items this PC does not have are (a stand-in,

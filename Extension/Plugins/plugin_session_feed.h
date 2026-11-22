@@ -220,11 +220,23 @@ inline void release_placements(const std::string& plugin) {
 // What another player wears, as their game sent it: the item names of their skater and of their
 // board (reskate.session.outfit). The session publishes each once it arrives or changes, and
 // keeps only the players still in it.
+// `packages`: the Thunderstore package each item is from, as their game named it
+// (CosmeticSlot::package). `missing`: the items this PC does not have and shows a stand-in for, as
+// the dresser found (publish_missing), merged in by outfit_of.
 struct Outfit {
     std::vector<std::string> skater, board;
+    std::map<std::string, std::string> packages;
+    std::set<std::string> missing;
 };
 namespace detail {
 inline std::map<std::uint64_t, Outfit> outfits;
+// By player, then by part (the recipe key: skater or board), each dressed on its own.
+inline std::map<std::uint64_t, std::map<std::uint32_t, std::set<std::string>>> missing;
+}
+// The items of one part of a player's outfit this PC does not have, replacing that part's last.
+inline void publish_missing(std::uint64_t player, std::uint32_t part, std::set<std::string> names) {
+    std::lock_guard lock(detail::mutex);
+    detail::missing[player][part] = std::move(names);
 }
 inline void publish_outfit(std::uint64_t player, Outfit outfit) {
     std::lock_guard lock(detail::mutex);
@@ -233,12 +245,16 @@ inline void publish_outfit(std::uint64_t player, Outfit outfit) {
 inline void keep_outfits(const std::set<std::uint64_t>& players) {
     std::lock_guard lock(detail::mutex);
     std::erase_if(detail::outfits, [&](const auto& item) { return !players.contains(item.first); });
+    std::erase_if(detail::missing, [&](const auto& item) { return !players.contains(item.first); });
 }
 inline std::optional<Outfit> outfit_of(std::uint64_t player) {
     std::lock_guard lock(detail::mutex);
     const auto found = detail::outfits.find(player);
     if (found == detail::outfits.end()) return std::nullopt;
-    return found->second;
+    auto outfit = found->second;
+    if (const auto parts = detail::missing.find(player); parts != detail::missing.end())
+        for (const auto& [part, names] : parts->second) outfit.missing.insert(names.begin(), names.end());
+    return outfit;
 }
 
 // Items plugins hide on other players (reskate.session.hide_items): shown on this screen as items

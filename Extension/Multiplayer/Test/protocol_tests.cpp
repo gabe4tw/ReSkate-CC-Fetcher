@@ -1,6 +1,7 @@
 #include "Extension/Multiplayer/Steam/steam_server_browser.h"
 #include "Server/steam_server.h"
 #include "Extension/Multiplayer/Net/protocol.h"
+#include "Extension/Multiplayer/Remote/item_packages.h"
 #include "Extension/Multiplayer/Net/wire_codec.h"
 #include "Extension/Throwdowns/throwdown_wire.h"
 #include "Engine/Game/World/park_randomization.h"
@@ -339,6 +340,60 @@ void malformed_input() {
             check(valid_pose(p->pose), "Decoder returned unsafe pose");
     }
 }
+// Which Thunderstore package a worn item comes from, as the sender tells its peers: the mod that
+// lists the item in the merge's reskate-items.json, named as a map's package is.
+void item_packages_lookup() {
+    using dingosdk::mods::ItemSource;
+    const std::vector<ItemSource> sources{
+        {"NolanIsHigh-NolanIsHighs_Cosmetics_Pack_1", "Pack", "NolanIsHigh", "1.2.0", "x", {"own_111_baker_holographic_deck"}},
+        {"MyLocalMod", "Mine", "me", "1.0.0", "y", {"own_my_tee"}},
+        {"Bad-Version", "B", "b", "not.a.version", "z", {"own_b"}}};
+    check(package_of(sources, "Own_111_Baker_Holographic_Deck") == "NolanIsHigh-NolanIsHighs_Cosmetics_Pack_1-1.2.0",
+          "Mixed-case asset finds its lower-case key and the package carries the version");
+    check(package_of(sources, "own_my_tee").empty(), "A folder that is not Owner-Name has no package");
+    check(package_of(sources, "Own_TopShirt_Gen_TshirtRelaxed_00007").empty(), "A game item has no package");
+    check(package_of(sources, "own_b") == "Bad-Version", "A bad manifest version still names the package, without a version");
+    check(package_of({}, "own_anything").empty(), "No sources, no package, no throw");
+}
+// The sender names at most 16 packages: once 16 are taken, further packages' items name none, while
+// more items of a package already named still name it.
+void attach_packages_cap() {
+    Appearance a{{skater_recipe_key, 2, {}, {}}, {board_recipe_key, 1, {}, {{1, "Own_Deck", {}}}}};
+    for (std::uint32_t i = 0; i < 18; ++i) a.skater.items.push_back({100 + i, "own_x" + std::to_string(i), {}});
+    a.skater.items.push_back({200, "own_again", {}});
+    attach_packages(a, [](std::string_view asset) -> std::string {
+        if (asset == "own_again") return "Owner-Pack1";
+        if (asset.starts_with("own_x")) return "Owner-Pack" + std::string(asset.substr(5));
+        return {};
+    });
+    std::vector<std::string> distinct;
+    for (const auto &item : a.skater.items)
+        if (!item.package.empty() && std::find(distinct.begin(), distinct.end(), item.package) == distinct.end())
+            distinct.push_back(item.package);
+    check(distinct.size() == max_outfit_packages, "Exactly 16 distinct packages are named");
+    check(a.skater.items[16].package.empty() && a.skater.items[17].package.empty(), "The 17th and 18th packages are not named");
+    check(a.skater.items[18].package == "Owner-Pack1", "Another item of a package already named still names it");
+    check(a.board.items[0].package.empty(), "A game item names none");
+    // An outfit just within the byte limit stays within it: packages that would not fit are left
+    // out rather than the outfit being refused (which would stop the session).
+    Appearance full{{skater_recipe_key, 2, {}, {}}, {board_recipe_key, 1, {}, {{1, "Own_Deck", {}}}}};
+    for (std::uint32_t i = 0; i < 16; ++i)
+        full.skater.items.push_back({100 + i, "own_item_" + std::string(80, static_cast<char>('a' + i)), {}});
+    for (std::uint32_t slot = 500; valid_appearance(full); ++slot)
+        full.skater.items.push_back({slot, "own_filler", std::vector<std::uint32_t>(128)});
+    full.skater.items.pop_back();
+    while (valid_appearance(full) && full.skater.items.back().parameters.size() < 128)
+        full.skater.items.back().parameters.push_back(0);
+    if (!valid_appearance(full)) full.skater.items.back().parameters.pop_back();
+    check(valid_appearance(full), "The test outfit is within the limit before packages");
+    attach_packages(full, [](std::string_view asset) -> std::string {
+        if (!asset.starts_with("own_item_")) return {};
+        return "Owner-" + std::string(80, asset[9]) + "-1.0.0";
+    });
+    check(valid_appearance(full), "Packages never push an outfit past the byte limit");
+    check(full.skater.items[0].package == "Owner-" + std::string(80, 'a') + "-1.0.0", "Packages that fit are still named, first first");
+    check(valid_appearance(a), "The outfit stays valid");
+}
 void cosmetics_codec() {
     auto p = frame(0xfffffffeU, 0);
     p.kind = PacketKind::cosmetics;
@@ -351,6 +406,35 @@ void cosmetics_codec() {
     const auto decoded = decode(bytes);
     check(decoded && decoded->appearance == p.appearance && !decoded->appearance.hide_tag && !decoded->appearance.hide_items,
           "Cosmetic fields or opaque parameter bits were lost");
+    // Each item can name the Thunderstore package it comes from, so a peer without it knows what
+    // to fetch; a package shared by several items travels once.
+    {
+        auto packaged = p;
+        packaged.appearance.skater.items[0].package = "NolanIsHigh-NolanIsHighs_Cosmetics_Pack_1-1.2.0";
+        packaged.appearance.board.items[0].package = "NolanIsHigh-NolanIsHighs_Cosmetics_Pack_1-1.2.0";
+        const auto packaged_bytes = encode(packaged);
+        const auto round = decode(packaged_bytes);
+        check(round && round->appearance == packaged.appearance, "Packages survive the wire, shared ones once");
+        check(round && round->appearance.skater.items[1].package.empty(), "A slot without a package stays without");
+        check(packaged_bytes.size() < bytes.size() + 2 * packaged.appearance.skater.items[0].package.size(),
+              "A shared package is written once");
+        auto bad = packaged;
+        bad.appearance.skater.items[0].package = "no spaces allowed";
+        check(!valid_appearance(bad.appearance), "An invalid package name is refused");
+        auto many = p;
+        many.appearance.skater.items.clear();
+        for (std::uint32_t i = 0; i < 17; ++i)
+            many.appearance.skater.items.push_back({100 + i, "own_x" + std::to_string(i), {}, "Owner-Pack" + std::to_string(i)});
+        check(!valid_appearance(many.appearance), "More than 16 distinct packages is refused");
+        many.appearance.skater.items.pop_back();
+        check(valid_appearance(many.appearance) && decode(encode([&] { auto q = p; q.appearance = many.appearance; return q; }())),
+              "16 distinct packages are fine");
+        // A table index past the table is refused, not read as some other package.
+        auto raw = packaged_bytes;
+        for (std::size_t i = raw.size(); i-- > 0;)
+            if (raw[i] == 0) { raw[i] = 5; break; } // the first slot's index from the end: 0 -> 5
+        check(!decode(raw), "A package index past the table is refused");
+    }
     // A player's choices to go without their backend tag, or its animated items, travel with
     // their outfit, each on its own.
     for (const auto &[tag, items] : {std::pair{true, false}, std::pair{false, true}, std::pair{true, true}}) {
@@ -1392,6 +1476,8 @@ int main() {
         skateboard_playback();
         matrices_and_invites();
         malformed_input();
+        item_packages_lookup();
+        attach_packages_cap();
         cosmetics_codec();
         sound_codec_and_timing();
         object_codec();

@@ -37,6 +37,7 @@ add_library(dingosdk_runtime SHARED
     Extension/Multiplayer/Remote/native_skater_spawn.cpp
     Extension/Multiplayer/Remote/puppet_cost.cpp
     Extension/Multiplayer/Remote/native_cosmetics.cpp
+    Extension/Multiplayer/Remote/item_packages.cpp
     Extension/Multiplayer/Remote/stand_ins.cpp
     Extension/Multiplayer/Remote/native_audio.cpp
     Extension/Multiplayer/Remote/native_vfx.cpp

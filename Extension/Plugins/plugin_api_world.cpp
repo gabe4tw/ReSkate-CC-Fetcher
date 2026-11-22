@@ -2088,8 +2088,10 @@ struct WorldApi {
         }
         return result(L, game_of(plugin).place_player(plugin.id(), player, std::move(placement)));
     }
-    // session.outfit(player): {skater = {names}, board = {names}}, the items that player wears as their
-    // game sent them; nil before their outfit arrives, or for a player not in the session.
+    // session.outfit(player): {skater = {names}, board = {names}, packages = {[name] = package},
+    // missing = {[name] = true}}, the items that player wears as their game sent them, the Thunderstore
+    // package each is from where their game named one ("Owner-Name-1.2.3"), and those this PC does not
+    // have; nil before their outfit arrives, or for a player not in the session.
     static int session_outfit(lua_State* L) {
         auto& plugin = plugin_of(L);
         need(L, plugin, "session.read", "reskate.session.outfit");
@@ -2101,11 +2103,23 @@ struct WorldApi {
             lua_pushnil(L);
             return 1;
         }
-        lua_createtable(L, 0, 2);
+        lua_createtable(L, 0, 4);
         push_texts(L, outfit->skater);
         lua_setfield(L, -2, "skater");
         push_texts(L, outfit->board);
         lua_setfield(L, -2, "board");
+        lua_createtable(L, 0, static_cast<int>(outfit->packages.size()));
+        for (const auto& [name, package] : outfit->packages) {
+            lua_pushlstring(L, package.data(), package.size());
+            lua_setfield(L, -2, name.c_str());
+        }
+        lua_setfield(L, -2, "packages");
+        lua_createtable(L, 0, static_cast<int>(outfit->missing.size()));
+        for (const auto& name : outfit->missing) {
+            lua_pushboolean(L, 1);
+            lua_setfield(L, -2, name.c_str());
+        }
+        lua_setfield(L, -2, "missing");
         return 1;
     }
     // session.hide_items({items = {names}, players = {[player] = {names}}}): those items shown on other

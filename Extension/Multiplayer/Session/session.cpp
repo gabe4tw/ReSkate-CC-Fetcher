@@ -913,6 +913,11 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                 if (!item.asset.empty() && !profile_runtime::reserved_cosmetic(item.asset)) outfit.skater.push_back(item.asset);
             for (const auto &item : look->board.items)
                 if (!item.asset.empty() && !profile_runtime::reserved_cosmetic(item.asset)) outfit.board.push_back(item.asset);
+            // The package each item is from, as their game named it (CosmeticSlot::package).
+            for (const auto *recipe : {&look->skater, &look->board})
+                for (const auto &item : recipe->items)
+                    if (!item.asset.empty() && !item.package.empty() && !profile_runtime::reserved_cosmetic(item.asset))
+                        outfit.packages[item.asset] = item.package;
             plugin_feed::publish_outfit(p.member.id, std::move(outfit));
             p.published_outfit = p.cosmetic_revision;
         }

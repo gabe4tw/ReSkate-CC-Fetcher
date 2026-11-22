@@ -9,6 +9,7 @@
 #include "Engine/Vfs/content_catalogs.h"
 #include "Extension/Customization/local_customization_runtime.h"
 #include "Extension/Customization/local_player_card_runtime.h"
+#include "Extension/Plugins/plugin_session_feed.h"
 #include <Windows.h>
 #include <map>
 #include <mutex>
@@ -210,6 +211,12 @@ void apply_cosmetic_recipe(std::uintptr_t base, std::uintptr_t entity, std::uint
     } else {
         swaps = memory.substitute_missing(resource, usable, default_cosmetic_items, blocked);
     }
+    // What this PC does not have of the player's outfit, for plugins (reskate.session.outfit's
+    // `missing`). Not the items stood in for only because they are store items or a plugin hides them.
+    std::set<std::string> missing_here;
+    for (const auto &[missing, replacement] : swaps)
+        if (!blocked(missing) && missing_here.size() < 256) missing_here.insert(missing);
+    plugin_feed::publish_missing(player, recipe.key, std::move(missing_here));
     for (const auto &[missing, replacement] : swaps) {
         static std::mutex logged_mutex;
         static std::set<std::string> logged;

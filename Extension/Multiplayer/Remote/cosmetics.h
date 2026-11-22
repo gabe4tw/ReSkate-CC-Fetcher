@@ -13,10 +13,17 @@ inline constexpr std::size_t max_cosmetic_slots = 64, max_cosmetic_scalars = 64,
 // The largest encoded outfit packet. Well under the packet limit, so an outfit a host accepts
 // always fits again with the reference marker a relayed copy carries.
 inline constexpr std::size_t max_appearance_bytes = 16384;
+// The most packages an outfit names for its items (CosmeticSlot::package): past them, items of
+// further packages name none.
+inline constexpr std::size_t max_outfit_packages = 16;
 struct CosmeticSlot {
     std::uint32_t slot{};
     std::string asset;
     std::vector<std::uint32_t> parameters;
+    // The Thunderstore package the item comes from on the wearer's PC ("Owner-Name-1.2.3",
+    // protocol.h: valid_map_package), so a peer without it can tell what to fetch
+    // (item_packages.h). Empty for the game's own items and for mods not from Thunderstore.
+    std::string package;
     bool operator==(const CosmeticSlot &) const = default;
 };
 struct CosmeticRecipe {

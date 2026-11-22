@@ -3881,13 +3881,16 @@ void plugins_read_and_hide_other_players_items() {
     TestEnvironment environment;
     auto& game = environment.fake;
     environment.session_now = {true, false, {{1, "Me", true, true}, {7, "Ann", false, false}, {8, "Bob", false, false}}};
-    game.outfits[7] = {{"Own_Nolan_Tee", "Own_Skull_Mask"}, {"Own_Deck_X"}};
+    game.outfits[7] = {{"Own_Nolan_Tee", "Own_Skull_Mask"}, {"Own_Deck_X"}, {{"Own_Nolan_Tee", "NolanIsHigh-Pack-1.0.0"}}, {"Own_Nolan_Tee"}};
     game.outfits[1] = {{"Own_Mine"}, {}};
     Host host(environment, Side::client);
     host.apply({script("filter", R"(
       reskate.console.command("go", "x", function()
         local ann = reskate.session.outfit("7")
         assert(ann and ann.skater[1] == "Own_Nolan_Tee" and ann.skater[2] == "Own_Skull_Mask" and ann.board[1] == "Own_Deck_X")
+        assert(ann.packages["Own_Nolan_Tee"] == "NolanIsHigh-Pack-1.0.0", "the item's package")
+        assert(ann.packages["Own_Skull_Mask"] == nil, "no package, no entry")
+        assert(ann.missing["Own_Nolan_Tee"] == true and ann.missing["Own_Deck_X"] == nil, "only what is missing here")
         assert(reskate.session.outfit({id = "7"}).board[1] == "Own_Deck_X", "a player table works too")
         assert(reskate.session.outfit("8") == nil, "no outfit yet")
         assert(reskate.session.outfit("9") == nil, "not in the session")

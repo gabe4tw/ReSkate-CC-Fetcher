@@ -527,7 +527,8 @@ public:
     std::optional<PlayerOutfit> player_outfit(std::uint64_t player) override {
         auto outfit = plugin_feed::outfit_of(player);
         if (!outfit) return std::nullopt;
-        return PlayerOutfit{std::move(outfit->skater), std::move(outfit->board)};
+        return PlayerOutfit{std::move(outfit->skater), std::move(outfit->board), std::move(outfit->packages),
+                            std::move(outfit->missing)};
     }
     std::string hide_items(std::string_view plugin, HiddenItems items) override {
         const auto lower = [](std::string name) {

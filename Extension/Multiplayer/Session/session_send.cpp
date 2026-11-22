@@ -1,5 +1,7 @@
 #include "session_internal.h"
 #include "Extension/Multiplayer/Remote/native_cosmetics.h"
+#include "Extension/Multiplayer/Remote/item_packages.h"
+#include "Extension/Customization/local_customization_runtime.h"
 #include "Extension/Multiplayer/Remote/native_audio.h"
 #include "Extension/Multiplayer/Remote/native_vfx.h"
 #include "Extension/Profile/local_profile_runtime.h"
@@ -737,6 +739,11 @@ void send_local(Session &s, const NativeFrame &local, std::uint64_t now, std::ui
             appearance->hide_items = !own_items_shown();
             appearance->marks = developer_hoodie_detail::own_styles.load();
             appearance->tag = own_tag_choice();
+            // Which Thunderstore package each item is from, so a player without it can fetch it.
+            // Never for paid store items, which nobody else is shown anyway.
+            attach_packages(*appearance, [](std::string_view asset) {
+                return profile_runtime::reserved_cosmetic(asset) ? std::string() : item_package(asset);
+            });
         }
         if (appearance && (!s.sent_appearance || *appearance != *s.sent_appearance)) {
             auto p = packet(s, PacketKind::cosmetics, now);
